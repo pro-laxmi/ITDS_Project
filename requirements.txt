@@ -1,0 +1,10 @@
+torch>=2.15.0
+torch_geometric>=2.8.1
+rdkit>=2026.09.1
+faiss-cpu>=1.15.1
+numpy>=2.5.4
+scipy>=1.18.1
+matplotlib>=3.11.2
+scikit-learn>=1.9.1
+tqdm>=4.70.1
+pandas>=3.1.1
