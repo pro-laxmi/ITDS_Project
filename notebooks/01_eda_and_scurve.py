@@ -73,8 +73,10 @@ def verify_scurve(
 
     hasher = MinHasher(num_hashes=b * r, seed=42)
     lsh = LSHBandingIndex(b=b, r=r)
-    theoretical_thresh = (1.0 / b) ** (1.0 / r)
-    print(f"Theoretical 50% collision threshold t* = {theoretical_thresh:.4f}")
+    exact_t50 = (1.0 - 2.0 ** (-1.0 / b)) ** (1.0 / r)
+    approx_t = (1.0 / b) ** (1.0 / r)
+    print(f"Exact 50% collision threshold t_50 = {exact_t50:.4f}")
+    print(f"Heuristic approximation (1/b)^(1/r) = {approx_t:.4f}")
 
     print(f"Generating {num_pairs} evaluation set pairs spanning J in [0, 1]...")
     pairs = generate_synthetic_shingle_pairs(num_pairs=num_pairs, seed=42)
@@ -141,9 +143,11 @@ def verify_scurve(
     plt.plot(s_fine, p_theoretical, label=f"Theoretical $P = 1 - (1 - s^{r})^{{{b}}}$", color="#1f77b4", linewidth=2.5)
     plt.plot(bin_centers[valid_mask], empirical_probs[valid_mask], "ro-", markersize=6, linewidth=1.5,
              label=f"Empirical Hit Rate (N={num_pairs}, MAE={mae:.3f})")
-    plt.axvline(theoretical_thresh, color="black", linestyle="--", alpha=0.7,
-                label=f"Phase Transition $t^* \\approx {theoretical_thresh:.3f}$")
-    plt.axhline(0.5, color="gray", linestyle=":", alpha=0.5)
+    plt.axvline(exact_t50, color="#d95f02", linestyle="--", alpha=0.85,
+                label=f"Exact $t_{{50}} = (1 - 2^{{-1/b}})^{{1/r}} \\approx {exact_t50:.3f}$")
+    plt.axvline(approx_t, color="gray", linestyle=":", alpha=0.6,
+                label=f"Heuristic $(1/b)^{{1/r}} \\approx {approx_t:.3f}$")
+    plt.axhline(0.5, color="gray", linestyle="--", alpha=0.5)
 
     plt.title(f"LSH MinHash Banding Phase Transition (b={b} bands, r={r} rows, k={b*r})", fontsize=14, fontweight="bold")
     plt.xlabel("True Jaccard Similarity $J(A, B)$", fontsize=12)

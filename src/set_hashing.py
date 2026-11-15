@@ -11,10 +11,12 @@ import numpy as np
 
 class MinHasher:
     """
-    Min-wise Independent Permutations (MinHash) implementation using 2-universal hashing.
-    Computes k-dimensional signatures for discrete sets to estimate Jaccard similarity.
+    MinHash implementation using 2-universal affine hashing h_i(x) = (a_i * x + b_i) mod p.
+    Provides a computationally practical approximation of min-wise independent permutations
+    over discrete sets to estimate Jaccard similarity.
     
-    Collision identity: Pr[h_min(A) == h_min(B)] = J(A, B)
+    Collision identity: Pr[h_min(A) == h_min(B)] = J(A, B) under ideal min-wise independent permutations;
+    2-universal hashing provides an empirical approximation with slight bounded variance.
     """
 
     def __init__(self, num_hashes: int = 128, prime: int = 4294967311, seed: int = 42):
@@ -100,8 +102,11 @@ class LSHBandingIndex:
         self.b = b
         self.r = r
         self.k = b * r
-        # Phase transition threshold where P(t) = 0.5
-        self.threshold = (1.0 / self.b) ** (1.0 / self.r)
+        # Exact theoretical 50% collision probability threshold where P(t_50) = 0.5:
+        # 1 - (1 - t_50^r)^b = 0.5  =>  t_50 = (1 - 2^(-1/b))^(1/r)
+        self.threshold = (1.0 - 2.0 ** (-1.0 / self.b)) ** (1.0 / self.r)
+        # Standard heuristic approximation: (1/b)^(1/r) where P(t) ≈ 1 - 1/e ≈ 0.632
+        self.approx_threshold = (1.0 / self.b) ** (1.0 / self.r)
 
         # Inverted index buckets per band: band_idx -> {hash_tuple: [doc_ids]}
         self.tables: List[Dict[Tuple[int, ...], List[int]]] = [defaultdict(list) for _ in range(self.b)]

@@ -31,7 +31,7 @@ def sweep_ef_search(corpus_embs: np.ndarray, query_embs: np.ndarray, query_label
     hnsw = ContinuousHNSWIndex(d=256, M=32, efConstruction=200, efSearch=64)
     hnsw.index(corpus_embs)
 
-    num_queries = min(500, len(query_labels))
+    num_queries = len(query_labels)  # Evaluate all 1,000 queries to match master table exactly
 
     for ef in ef_values:
         hnsw.set_ef_search(ef)
@@ -83,9 +83,9 @@ def run_sweeps(output_path: str = "artifacts/param_sweeps.png"):
     # MinHash theoretical banding curves
     s = np.linspace(0.0, 1.0, 200)
     banding_configs = [
-        (16, 8, "#d95f02", "Strict (b=16, r=8, t* ≈ 0.707)"),
-        (32, 4, "#1b9e77", "Balanced (b=32, r=4, t* ≈ 0.420)"),
-        (64, 2, "#7570b3", "High-Recall (b=64, r=2, t* ≈ 0.125)"),
+        (16, 8, "#d95f02", "Strict (b=16, r=8, exact $t_{50} \\approx 0.676$)"),
+        (32, 4, "#1b9e77", "Balanced (b=32, r=4, exact $t_{50} \\approx 0.383$)"),
+        (64, 2, "#7570b3", "High-Recall (b=64, r=2, exact $t_{50} \\approx 0.104$)"),
     ]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), dpi=300)
@@ -104,14 +104,14 @@ def run_sweeps(output_path: str = "artifacts/param_sweeps.png"):
     ax1_twin.plot(ef_vals, lats, "s--", color=color_lat, linewidth=2.0, label="Latency (ms)")
     ax1_twin.set_ylabel("Single-Query Latency (ms)", color=color_lat, fontsize=11, fontweight="medium")
     ax1_twin.tick_params(axis='y', labelcolor=color_lat)
-    ax1.set_title("HNSW Query Candidate Pool (efSearch) Sensitivity", fontsize=12, fontweight="bold")
+    ax1.set_title("HNSW Candidate Pool (efSearch) Sensitivity (GIN-SupCon)", fontsize=12, fontweight="bold")
 
     # Panel 2: MinHash S-Curve Phase Transitions
     for b, r, col, label in banding_configs:
         prob = LSHBandingIndex.theoretical_collision_prob(s, b=b, r=r)
         ax2.plot(s, prob, color=col, linewidth=2.2, label=label)
-        t_star = (1.0 / b) ** (1.0 / r)
-        ax2.axvline(t_star, color=col, linestyle=":", alpha=0.6)
+        t_50 = (1.0 - 2.0 ** (-1.0 / b)) ** (1.0 / r)
+        ax2.axvline(t_50, color=col, linestyle=":", alpha=0.7)
 
     ax2.axhline(0.5, color="gray", linestyle="--", alpha=0.5)
     ax2.set_xlabel("True Jaccard Similarity J(A, B)", fontsize=11, fontweight="medium")

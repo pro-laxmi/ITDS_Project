@@ -41,17 +41,25 @@ def run_depth_analysis(output_path: str = "artifacts/depth_curves.png"):
     with open("data/processed_cache.pkl", "rb") as f:
         cache = pickle.load(f)
 
-    corpus_labels = cache["corpus_labels"]
-    query_labels = cache["query_labels"]
+    with open("data/exact_scaffolds.pkl", "rb") as f:
+        scaff_data = pickle.load(f)
+
+    c_scaff = scaff_data["corpus_scaffolds"]
+    q_scaff = scaff_data["query_scaffolds"]
     corpus_bits = cache["corpus_bits"]
     query_bits = cache["query_bits"]
 
-    # Pre-index ground truth
-    label_to_corpus = {}
-    for i, lbl in enumerate(corpus_labels):
-        if lbl not in label_to_corpus:
-            label_to_corpus[lbl] = set()
-        label_to_corpus[lbl].add(i)
+    # Pre-index exact Murcko scaffold ground truth
+    scaff_to_corpus = {}
+    for i, s in enumerate(c_scaff):
+        if s != "__EMPTY__":
+            if s not in scaff_to_corpus:
+                scaff_to_corpus[s] = set()
+            scaff_to_corpus[s].add(i)
+
+    # Covered queries with >= 1 exact Murcko scaffold match in corpus
+    eval_queries = [q for q in range(len(q_scaff)) if q_scaff[q] in scaff_to_corpus]
+    print(f"Evaluating multi-depth curves on {len(eval_queries)} genuine covered scaffold queries...")
 
     # 1. Pipeline 1: ECFP + MinHash
     hasher = MinHasher(128, seed=42)
@@ -70,7 +78,7 @@ def run_depth_analysis(output_path: str = "artifacts/depth_curves.png"):
     cont_hnsw = ContinuousHNSWIndex(256, M=32, efConstruction=200, efSearch=64)
     cont_hnsw.index(corpus_embs)
 
-    # Optional: GIN-CE if available
+    # 4. GIN-CE if available
     ce_available = os.path.exists("artifacts/embs_ce_corpus.npy")
     if ce_available:
         ce_corpus = np.load("artifacts/embs_ce_corpus.npy")
@@ -78,12 +86,20 @@ def run_depth_analysis(output_path: str = "artifacts/depth_curves.png"):
         ce_hnsw = ContinuousHNSWIndex(256, M=32, efConstruction=200, efSearch=64)
         ce_hnsw.index(ce_corpus)
 
+    # 5. GIN-ProxyAnchor if available
+    pa_available = os.path.exists("artifacts/embs_proxyanchor_corpus.npy")
+    if pa_available:
+        pa_corpus = np.load("artifacts/embs_proxyanchor_corpus.npy")
+        pa_query = np.load("artifacts/embs_proxyanchor_query.npy")
+        pa_hnsw = ContinuousHNSWIndex(256, M=32, efConstruction=200, efSearch=64)
+        pa_hnsw.index(pa_corpus)
+
     depths = [1, 3, 5, 10, 15, 20, 30, 40, 50]
-    num_queries = len(query_labels)
+    num_queries = len(q_scaff)
 
     # Precompute top-50 for all systems
     print("Retrieving top-50 shortlists for all queries...")
-    p1_results, p2_results, p4_results, ce_results = [], [], [], []
+    p1_results, p2_results, p4_results, ce_results, pa_results = [], [], [], [], []
 
     for q in range(num_queries):
         # P1
@@ -102,16 +118,21 @@ def run_depth_analysis(output_path: str = "artifacts/depth_curves.png"):
             _, rce = ce_hnsw.search(ce_query[q], k=50)
             ce_results.append(list(rce))
 
+        if pa_available:
+            _, rpa = pa_hnsw.search(pa_query[q], k=50)
+            pa_results.append(list(rpa))
+
     # Evaluate across k
     p1_maps, p1_recs = [], []
     p2_maps, p2_recs = [], []
     p4_maps, p4_recs = [], []
     ce_maps, ce_recs = [], []
+    pa_maps, pa_recs = [], []
 
     for k in depths:
-        m1, r1, m2, r2, m4, r4, mce, rce = [], [], [], [], [], [], [], []
-        for q in range(num_queries):
-            gt = label_to_corpus.get(query_labels[q], set())
+        m1, r1, m2, r2, m4, r4, mce, rce, mpa, rpa = [], [], [], [], [], [], [], [], [], []
+        for q in eval_queries:
+            gt = scaff_to_corpus.get(q_scaff[q], set())
             ap1, rec1 = compute_metrics_at_k(p1_results[q], gt, k)
             ap2, rec2 = compute_metrics_at_k(p2_results[q], gt, k)
             ap4, rec4 = compute_metrics_at_k(p4_results[q], gt, k)
@@ -121,19 +142,26 @@ def run_depth_analysis(output_path: str = "artifacts/depth_curves.png"):
             if ce_available:
                 apce, recce = compute_metrics_at_k(ce_results[q], gt, k)
                 mce.append(apce); rce.append(recce)
+            if pa_available:
+                appa, recpa = compute_metrics_at_k(pa_results[q], gt, k)
+                mpa.append(appa); rpa.append(recpa)
 
         p1_maps.append(np.mean(m1)); p1_recs.append(np.mean(r1))
         p2_maps.append(np.mean(m2)); p2_recs.append(np.mean(r2))
         p4_maps.append(np.mean(m4)); p4_recs.append(np.mean(r4))
         if ce_available:
             ce_maps.append(np.mean(mce)); ce_recs.append(np.mean(rce))
+        if pa_available:
+            pa_maps.append(np.mean(mpa)); pa_recs.append(np.mean(rpa))
 
     # Plot two panels: Left = MAP@k, Right = Recall@k
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), dpi=300)
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
 
     # Panel 1: MAP@k
-    ax1.plot(depths, p4_maps, "o-", color="#1b9e77", linewidth=2.5, label="GIN-SupCon + FAISS HNSW")
+    if pa_available:
+        ax1.plot(depths, pa_maps, "X-", color="#e63946", linewidth=2.5, label="GIN-ProxyAnchor + HNSW")
+    ax1.plot(depths, p4_maps, "o-", color="#1b9e77", linewidth=2.2, label="GIN-SupCon + FAISS HNSW")
     if ce_available:
         ax1.plot(depths, ce_maps, "d-", color="#386cb0", linewidth=2.0, label="GIN-CE + FAISS HNSW")
     ax1.plot(depths, p2_maps, "^-", color="#7570b3", linewidth=2.0, label="ECFP + Binary HNSW")
@@ -146,7 +174,9 @@ def run_depth_analysis(output_path: str = "artifacts/depth_curves.png"):
     ax1.legend(loc="upper right", frameon=True, fontsize=10)
 
     # Panel 2: Recall@k
-    ax2.plot(depths, p4_recs, "o-", color="#1b9e77", linewidth=2.5, label="GIN-SupCon + FAISS HNSW")
+    if pa_available:
+        ax2.plot(depths, pa_recs, "X-", color="#e63946", linewidth=2.5, label="GIN-ProxyAnchor + HNSW")
+    ax2.plot(depths, p4_recs, "o-", color="#1b9e77", linewidth=2.2, label="GIN-SupCon + FAISS HNSW")
     if ce_available:
         ax2.plot(depths, ce_recs, "d-", color="#386cb0", linewidth=2.0, label="GIN-CE + FAISS HNSW")
     ax2.plot(depths, p2_recs, "^-", color="#7570b3", linewidth=2.0, label="ECFP + Binary HNSW")
