@@ -3,3 +3,4 @@ artifacts/
 data/
 __pycache__/
 *.py[cod]
+legacy/
